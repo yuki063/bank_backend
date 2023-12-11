@@ -23,6 +23,7 @@ const oauth2Client = new google.auth.OAuth2();
 router.post('/login', async (req, res) => {
 	const { type, email, password } = req.body;
 	const clientIp = req.clientIp;
+	console.log(email, 'email');
 	console.log(type, email, password, clientIp);
 	try {
 		if (!email || !password) {
@@ -228,5 +229,83 @@ router.post('/loginByGoogle', async (req, res) => {
 			msg: 'success',
 		});
 	}
+});
+
+router.post('/resendCode', (req, res) => {
+	const { email } = req.body;
+	console.log(req.body);
+	var code = Math.floor(Math.random() * 10000000) % 1000000;
+	if (code < 100000) code = code * 10;
+	verifycodeList[email] = code;
+	console.log(verifycodeList);
+
+	var transporter = nodemailer.createTransport({
+		service: 'gmail',
+		auth: {
+			user: 'ruka0430petri@gmail.com',
+			pass: 'nnkkclzckscepylm',
+		},
+	});
+	var mailOptions = {
+		from: 'ruka0430petri@gmail.com',
+		to: email,
+		subject: 'Verify Code',
+		html: '<html><p>Verification code is ' + code + ' </p></html>',
+	};
+	transporter.resendMail(mailOptions, function (error, info) {
+		if (error) {
+			console.log(error, 'mail resend error');
+			res.status(200).json({ msg: 'failed' });
+		} else {
+			console.log('Email sent: ' + info.response);
+			res.status(200).json({ msg: 'success' });
+		}
+	});
+});
+
+router.post('/resetPassword', (req, res) => {
+	let { token, newPassword, oldPassword } = req.body;
+	console.log(token, newPassword, oldPassword);
+	if (!token || !newPassword)
+		return res.status(201).json({ msg: 'Invalid Reset Token' });
+
+	jwt.verify(token, process.env['JWT_SECRET'], async (error, decoded) => {
+		if (error) {
+			return res.status(201).json({ msg: 'Invalid Reset Token' });
+		} else {
+			const saltRounds = 10;
+			const passwordHash = await bcrypt.hash(newPassword, saltRounds);
+			console.log(decoded.userId, passwordHash, newPassword);
+
+			const user = await User.findById(decoded.userId);
+			const matchPassword = await bcrypt.compare(
+				oldPassword,
+				user.passwordHash
+			);
+			if (matchPassword == false)
+				return res.status(201).json({ msg: 'Old Password is wrong' });
+
+			User.findByIdAndUpdate(decoded.userId, {
+				passwordHash: passwordHash,
+				emailConfirmed: true,
+			})
+				.then((user) => {
+					const newToken = jwt.sign(
+						{
+							userId: user._id,
+							emailConfirmed: true,
+						},
+						process.env['JWT_SECRET'],
+						{
+							expiresIn: process.env['TOKEN_EXPIRATION_TIME'],
+						}
+					);
+					return res.json({ user: newToken });
+				})
+				.catch((error) => {
+					return res.status(201).json({ msg: 'New Email Save Error!' });
+				});
+		}
+	});
 });
 export default router;
